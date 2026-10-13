@@ -1,9 +1,22 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+// Set to false once contact requests are really saved (Supabase step).
+// While true, the page tells visitors honestly that nothing is delivered.
+const DEMO_MODE = true;
 
 type Category = "Aircon" | "Plumbing" | "Tutoring" | "Electrical" | "Cleaning";
 type Filter = "All" | Category;
+type Status = "idle" | "sending" | "sent" | "error";
 
 interface Provider {
   id: number;
@@ -16,8 +29,11 @@ interface Provider {
 interface ContactForm {
   name: string;
   email: string;
+  phone: string;
   message: string;
 }
+
+type FormErrors = Partial<Record<keyof ContactForm, string>>;
 
 const FILTERS: Filter[] = [
   "All",
@@ -88,16 +104,78 @@ const CATEGORY_STYLES: Record<Category, string> = {
   Cleaning: "bg-emerald-100 text-emerald-800",
 };
 
-const EMPTY_FORM: ContactForm = { name: "", email: "", message: "" };
+const EMPTY_FORM: ContactForm = { name: "", email: "", phone: "", message: "" };
 
-const inputClass =
-  "w-full rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-200";
+const baseInput =
+  "w-full rounded-xl border bg-white/80 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm outline-none transition focus:ring-4";
+
+function inputClass(hasError: boolean) {
+  return `${baseInput} ${
+    hasError
+      ? "border-rose-400 focus:border-rose-500 focus:ring-rose-200"
+      : "border-slate-200 focus:border-indigo-400 focus:ring-indigo-200"
+  }`;
+}
+
+function validate(form: ContactForm): FormErrors {
+  const errors: FormErrors = {};
+  if (form.name.trim() === "") {
+    errors.name = "Please enter your name.";
+  }
+  if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) {
+    errors.email = "Enter a valid email, like juan@example.com.";
+  }
+  if (form.message.trim().length < 10) {
+    errors.message = "Please write a short message (at least 10 characters).";
+  }
+  return errors;
+}
+
+// Swap the body of this function for a Supabase insert later.
+// It should throw if saving fails so the form can show the error state.
+async function submitContact(provider: Provider, data: ContactForm) {
+  console.log({ provider: provider.name, ...data });
+  await new Promise((resolve) => setTimeout(resolve, 600));
+}
+
+function Field({
+  id,
+  label,
+  optional,
+  error,
+  children,
+}: {
+  id: string;
+  label: string;
+  optional?: boolean;
+  error?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <label htmlFor={id} className="text-sm font-medium text-slate-700">
+        {label}
+        {optional && (
+          <span className="font-normal text-slate-500"> (optional)</span>
+        )}
+      </label>
+      {children}
+      {error && (
+        <p id={`${id}-error`} role="alert" className="text-sm text-rose-600">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function Page() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("All");
   const [activeProvider, setActiveProvider] = useState<Provider | null>(null);
   const [form, setForm] = useState<ContactForm>(EMPTY_FORM);
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [status, setStatus] = useState<Status>("idle");
 
   const filteredProviders = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -112,20 +190,26 @@ export default function Page() {
     });
   }, [query, filter]);
 
-  const closeModal = () => {
+  const clearFilters = () => {
+    setQuery("");
+    setFilter("All");
+  };
+
+  const closeModal = useCallback(() => {
+    // Don't let people lose their message while it is being sent.
+    if (status === "sending") return;
     setActiveProvider(null);
     setForm(EMPTY_FORM);
-  };
+    setErrors({});
+    setStatus("idle");
+  }, [status]);
 
   // Close on Escape and lock background scroll while the modal is open.
   useEffect(() => {
     if (!activeProvider) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setActiveProvider(null);
-        setForm(EMPTY_FORM);
-      }
+      if (e.key === "Escape") closeModal();
     };
 
     const previousOverflow = document.body.style.overflow;
@@ -136,22 +220,36 @@ export default function Page() {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [activeProvider]);
+  }, [activeProvider, closeModal]);
 
   const handleChange = (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
+    setErrors((prev) => ({ ...prev, [name]: undefined }));
+    if (status === "error") setStatus("idle");
   };
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    console.log({
-      provider: activeProvider?.name,
-      ...form,
-    });
-    closeModal();
+    if (!activeProvider || status === "sending") return;
+
+    const found = validate(form);
+    setErrors(found);
+    const firstInvalid = (Object.keys(found) as (keyof ContactForm)[])[0];
+    if (firstInvalid) {
+      document.getElementById(`contact-${firstInvalid}`)?.focus();
+      return;
+    }
+
+    setStatus("sending");
+    try {
+      await submitContact(activeProvider, form);
+      setStatus("sent");
+    } catch {
+      setStatus("error");
+    }
   };
 
   return (
@@ -171,13 +269,23 @@ export default function Page() {
       />
 
       <main className="mx-auto w-full max-w-5xl pb-8">
+        {DEMO_MODE && (
+          <p
+            role="note"
+            className="m-4 rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-sm leading-relaxed text-amber-900 backdrop-blur-md"
+          >
+            <span className="font-semibold">Demo preview.</span> These are
+            sample listings, not real businesses, and messages are not sent yet.
+          </p>
+        )}
+
         {/* Header: app name + search */}
         <header className="m-4 rounded-3xl border border-white/60 bg-white/80 p-4 shadow-lg shadow-indigo-900/5 backdrop-blur-md sm:p-6">
           <h1 className="text-2xl font-bold tracking-tight text-indigo-950 sm:text-3xl">
             SerbisyoPH
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            Find trusted local services near you.
+            Find local services near you.
           </p>
 
           <div className="relative mt-4">
@@ -202,7 +310,7 @@ export default function Page() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search by name, service, or city"
-              className={`${inputClass} py-3.5 pl-12`}
+              className={`${inputClass(false)} py-3.5 pl-12`}
             />
           </div>
         </header>
@@ -218,7 +326,7 @@ export default function Page() {
                     type="button"
                     onClick={() => setFilter(item)}
                     aria-pressed={isActive}
-                    className={`rounded-full border px-5 py-2.5 text-sm font-medium backdrop-blur-md transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 ${
+                    className={`rounded-full border px-5 py-2.5 text-sm font-medium transition md:backdrop-blur-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 ${
                       isActive
                         ? "border-indigo-600 bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
                         : "border-white/60 bg-white/80 text-slate-700 hover:bg-white"
@@ -240,19 +348,29 @@ export default function Page() {
           </p>
 
           {filteredProviders.length === 0 ? (
-            <div className="rounded-3xl border border-white/60 bg-white/80 p-6 text-center shadow-lg shadow-indigo-900/5 backdrop-blur-md">
-              <p className="font-medium text-slate-800">
-                No providers match your search.
-              </p>
-              <p className="mt-1 text-sm text-slate-600">
-                Try a different keyword, or choose All to see every category.
-              </p>
+            <div className="flex flex-col items-center gap-4 rounded-3xl border border-white/60 bg-white/80 p-6 text-center shadow-lg shadow-indigo-900/5 backdrop-blur-md">
+              <div>
+                <p className="font-medium text-slate-800">
+                  No providers match your search.
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  Try a different keyword, or clear your filters to see
+                  everything.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
+              >
+                Clear search and filters
+              </button>
             </div>
           ) : (
             <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {filteredProviders.map((provider) => (
                 <li key={provider.id}>
-                  <article className="flex h-full flex-col gap-4 rounded-3xl border border-white/60 bg-white/80 p-5 shadow-lg shadow-indigo-900/5 backdrop-blur-md">
+                  <article className="flex h-full flex-col gap-4 rounded-3xl border border-white/60 bg-white/80 p-5 shadow-lg shadow-indigo-900/5 md:backdrop-blur-md">
                     <div className="flex flex-col gap-2">
                       <span
                         className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${CATEGORY_STYLES[provider.category]}`}
@@ -309,7 +427,7 @@ export default function Page() {
             aria-modal="true"
             aria-labelledby="contact-title"
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-3xl border border-white/60 bg-white/80 p-6 shadow-2xl backdrop-blur-md"
+            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-white/60 bg-white/80 p-6 shadow-2xl backdrop-blur-md"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -326,8 +444,9 @@ export default function Page() {
               <button
                 type="button"
                 onClick={closeModal}
+                disabled={status === "sending"}
                 aria-label="Close contact form"
-                className="rounded-full p-2 text-slate-500 transition hover:bg-white hover:text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
+                className="rounded-full p-2 text-slate-500 transition hover:bg-white hover:text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 disabled:opacity-40"
               >
                 <svg
                   aria-hidden="true"
@@ -340,74 +459,169 @@ export default function Page() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <label
-                  htmlFor="contact-name"
-                  className="text-sm font-medium text-slate-700"
-                >
-                  Your name
-                </label>
-                <input
-                  id="contact-name"
-                  name="name"
-                  type="text"
-                  required
-                  autoFocus
-                  autoComplete="name"
-                  value={form.name}
-                  onChange={handleChange}
-                  placeholder="Juan Dela Cruz"
-                  className={inputClass}
-                />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label
-                  htmlFor="contact-email"
-                  className="text-sm font-medium text-slate-700"
-                >
-                  Email
-                </label>
-                <input
-                  id="contact-email"
-                  name="email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={form.email}
-                  onChange={handleChange}
-                  placeholder="juan@example.com"
-                  className={inputClass}
-                />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label
-                  htmlFor="contact-message"
-                  className="text-sm font-medium text-slate-700"
-                >
-                  Message
-                </label>
-                <textarea
-                  id="contact-message"
-                  name="message"
-                  required
-                  rows={4}
-                  value={form.message}
-                  onChange={handleChange}
-                  placeholder="Tell them what you need and when."
-                  className={`${inputClass} resize-none`}
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="mt-2 w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
+            {status === "sent" ? (
+              <div
+                role="status"
+                className="mt-6 flex flex-col items-center gap-4 text-center"
               >
-                Send message
-              </button>
-            </form>
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="h-7 w-7"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 111.4-1.4l3.8 3.8 6.8-6.8a1 1 0 011.4 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-slate-900">
+                  {DEMO_MODE ? "Demo only: nothing was sent" : "Message sent"}
+                </h3>
+                <p className="text-sm leading-relaxed text-slate-700">
+                  {DEMO_MODE
+                    ? "This is a sample listing, so your message was not delivered to anyone."
+                    : `${activeProvider.name} will reply to ${form.email.trim()}.`}
+                </p>
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <form
+                onSubmit={handleSubmit}
+                noValidate
+                className="mt-4 flex flex-col gap-4"
+              >
+                <Field id="contact-name" label="Your name" error={errors.name}>
+                  <input
+                    id="contact-name"
+                    name="name"
+                    type="text"
+                    autoFocus
+                    autoComplete="name"
+                    value={form.name}
+                    onChange={handleChange}
+                    placeholder="Juan Dela Cruz"
+                    aria-invalid={Boolean(errors.name)}
+                    aria-describedby={
+                      errors.name ? "contact-name-error" : undefined
+                    }
+                    className={inputClass(Boolean(errors.name))}
+                  />
+                </Field>
+
+                <Field id="contact-email" label="Email" error={errors.email}>
+                  <input
+                    id="contact-email"
+                    name="email"
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    value={form.email}
+                    onChange={handleChange}
+                    placeholder="juan@example.com"
+                    aria-invalid={Boolean(errors.email)}
+                    aria-describedby={
+                      errors.email ? "contact-email-error" : undefined
+                    }
+                    className={inputClass(Boolean(errors.email))}
+                  />
+                </Field>
+
+                <Field id="contact-phone" label="Mobile number" optional>
+                  <input
+                    id="contact-phone"
+                    name="phone"
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    value={form.phone}
+                    onChange={handleChange}
+                    placeholder="09XX XXX XXXX"
+                    className={inputClass(false)}
+                  />
+                </Field>
+
+                <Field
+                  id="contact-message"
+                  label="Message"
+                  error={errors.message}
+                >
+                  <textarea
+                    id="contact-message"
+                    name="message"
+                    rows={4}
+                    value={form.message}
+                    onChange={handleChange}
+                    placeholder="Tell them what you need and when."
+                    aria-invalid={Boolean(errors.message)}
+                    aria-describedby={
+                      errors.message ? "contact-message-error" : undefined
+                    }
+                    className={`${inputClass(Boolean(errors.message))} resize-none`}
+                  />
+                </Field>
+
+                {status === "error" && (
+                  <p
+                    role="alert"
+                    className="rounded-xl border border-rose-200 bg-rose-50/80 p-4 text-sm leading-relaxed text-rose-800"
+                  >
+                    We couldn&apos;t send your message. Check your connection
+                    and try again. Everything you typed is still here.
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={status === "sending"}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {status === "sending" && (
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      className="h-4 w-4 animate-spin"
+                    >
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="9"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        className="opacity-25"
+                      />
+                      <path
+                        d="M21 12a9 9 0 00-9-9"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  )}
+                  {status === "sending"
+                    ? "Sending..."
+                    : status === "error"
+                      ? "Try again"
+                      : "Send message"}
+                </button>
+
+                <p className="text-xs leading-relaxed text-slate-600">
+                  Your details are shared only with {activeProvider.name}, so
+                  they can reply to you.
+                  {DEMO_MODE && " Demo mode: messages are not sent yet."}
+                </p>
+              </form>
+            )}
           </div>
         </div>
       )}
