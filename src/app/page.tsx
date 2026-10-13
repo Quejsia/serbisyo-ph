@@ -33,7 +33,7 @@ interface ContactForm {
   message: string;
 }
 
-type FormErrors = Partial<Record<keyof ContactForm, string>>;
+type FormErrors = Partial<Record<keyof ContactForm | "contact", string>>;
 
 const FILTERS: Filter[] = [
   "All",
@@ -107,7 +107,7 @@ const CATEGORY_STYLES: Record<Category, string> = {
 const EMPTY_FORM: ContactForm = { name: "", email: "", phone: "", message: "" };
 
 const baseInput =
-  "w-full rounded-xl border bg-white/80 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm outline-none transition focus:ring-4";
+  "w-full rounded-xl border bg-white/80 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-500 shadow-sm outline-none transition focus:ring-4";
 
 function inputClass(hasError: boolean) {
   return `${baseInput} ${
@@ -122,8 +122,17 @@ function validate(form: ContactForm): FormErrors {
   if (form.name.trim() === "") {
     errors.name = "Please enter your name.";
   }
-  if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) {
-    errors.email = "Enter a valid email, like juan@example.com.";
+  const email = form.email.trim();
+  const phone = form.phone.trim();
+  if (email === "" && phone === "") {
+    errors.contact = "Add an email or a mobile number so they can reply.";
+  } else {
+    if (email !== "" && !/^\S+@\S+\.\S+$/.test(email)) {
+      errors.email = "Enter a valid email, like juan@example.com.";
+    }
+    if (phone !== "" && phone.replace(/\D/g, "").length < 10) {
+      errors.phone = "Enter a valid mobile number, like 0917 123 4567.";
+    }
   }
   if (form.message.trim().length < 10) {
     errors.message = "Please write a short message (at least 10 characters).";
@@ -227,7 +236,11 @@ export default function Page() {
   ) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
-    setErrors((prev) => ({ ...prev, [name]: undefined }));
+    setErrors((prev) => ({
+      ...prev,
+      [name]: undefined,
+      contact: name === "email" || name === "phone" ? undefined : prev.contact,
+    }));
     if (status === "error") setStatus("idle");
   };
 
@@ -237,9 +250,11 @@ export default function Page() {
 
     const found = validate(form);
     setErrors(found);
-    const firstInvalid = (Object.keys(found) as (keyof ContactForm)[])[0];
+    const firstInvalid = (Object.keys(found) as (keyof FormErrors)[])[0];
     if (firstInvalid) {
-      document.getElementById(`contact-${firstInvalid}`)?.focus();
+      const targetId =
+        firstInvalid === "contact" ? "contact-email" : `contact-${firstInvalid}`;
+      document.getElementById(targetId)?.focus();
       return;
     }
 
@@ -257,15 +272,15 @@ export default function Page() {
       {/* Soft background shapes so the glass panels have something to blur */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -left-24 -top-24 -z-10 h-72 w-72 rounded-full bg-sky-300/50 blur-3xl"
+        className="pointer-events-none absolute hidden md:block -left-24 -top-24 -z-10 h-72 w-72 rounded-full bg-sky-300/50 blur-3xl"
       />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -right-24 top-1/3 -z-10 h-80 w-80 rounded-full bg-indigo-300/50 blur-3xl"
+        className="pointer-events-none absolute hidden md:block -right-24 top-1/3 -z-10 h-80 w-80 rounded-full bg-indigo-300/50 blur-3xl"
       />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -bottom-24 left-1/4 -z-10 h-72 w-72 rounded-full bg-amber-300/50 blur-3xl"
+        className="pointer-events-none absolute hidden md:block -bottom-24 left-1/4 -z-10 h-72 w-72 rounded-full bg-amber-300/50 blur-3xl"
       />
 
       <main className="mx-auto w-full max-w-5xl pb-8">
@@ -296,7 +311,7 @@ export default function Page() {
               aria-hidden="true"
               viewBox="0 0 20 20"
               fill="currentColor"
-              className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400"
+              className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500"
             >
               <path
                 fillRule="evenodd"
@@ -326,7 +341,7 @@ export default function Page() {
                     type="button"
                     onClick={() => setFilter(item)}
                     aria-pressed={isActive}
-                    className={`rounded-full border px-5 py-2.5 text-sm font-medium transition md:backdrop-blur-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 ${
+                    className={`rounded-full border px-5 py-3 text-sm font-medium transition active:scale-[0.98] md:backdrop-blur-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 ${
                       isActive
                         ? "border-indigo-600 bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
                         : "border-white/60 bg-white/80 text-slate-700 hover:bg-white"
@@ -361,7 +376,7 @@ export default function Page() {
               <button
                 type="button"
                 onClick={clearFilters}
-                className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
+                className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
               >
                 Clear search and filters
               </button>
@@ -404,7 +419,7 @@ export default function Page() {
                     <button
                       type="button"
                       onClick={() => setActiveProvider(provider)}
-                      className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
+                      className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
                     >
                       Contact
                     </button>
@@ -446,7 +461,7 @@ export default function Page() {
                 onClick={closeModal}
                 disabled={status === "sending"}
                 aria-label="Close contact form"
-                className="rounded-full p-2 text-slate-500 transition hover:bg-white hover:text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 disabled:opacity-40"
+                className="flex h-11 w-11 items-center justify-center rounded-full text-slate-500 transition active:scale-95 hover:bg-white hover:text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 disabled:opacity-40"
               >
                 <svg
                   aria-hidden="true"
@@ -484,12 +499,12 @@ export default function Page() {
                 <p className="text-sm leading-relaxed text-slate-700">
                   {DEMO_MODE
                     ? "This is a sample listing, so your message was not delivered to anyone."
-                    : `${activeProvider.name} will reply to ${form.email.trim()}.`}
+                    : `${activeProvider.name} will reply to ${form.email.trim() || form.phone.trim()}.`}
                 </p>
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
+                  className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
                 >
                   Done
                 </button>
@@ -518,37 +533,78 @@ export default function Page() {
                   />
                 </Field>
 
-                <Field id="contact-email" label="Email" error={errors.email}>
-                  <input
-                    id="contact-email"
-                    name="email"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    value={form.email}
-                    onChange={handleChange}
-                    placeholder="juan@example.com"
-                    aria-invalid={Boolean(errors.email)}
-                    aria-describedby={
-                      errors.email ? "contact-email-error" : undefined
-                    }
-                    className={inputClass(Boolean(errors.email))}
-                  />
-                </Field>
+                <div
+                  role="group"
+                  aria-labelledby="reach-label"
+                  className="flex flex-col gap-4"
+                >
+                  <p id="reach-label" className="text-sm text-slate-600">
+                    How can they reach you? Add an email, a mobile number, or
+                    both.
+                  </p>
 
-                <Field id="contact-phone" label="Mobile number" optional>
-                  <input
+                  <Field id="contact-email" label="Email" error={errors.email}>
+                    <input
+                      id="contact-email"
+                      name="email"
+                      type="email"
+                      inputMode="email"
+                      autoComplete="email"
+                      value={form.email}
+                      onChange={handleChange}
+                      placeholder="juan@example.com"
+                      aria-invalid={Boolean(errors.email || errors.contact)}
+                      aria-describedby={
+                        errors.email
+                          ? "contact-email-error"
+                          : errors.contact
+                            ? "contact-error"
+                            : undefined
+                      }
+                      className={inputClass(
+                        Boolean(errors.email || errors.contact)
+                      )}
+                    />
+                  </Field>
+
+                  <Field
                     id="contact-phone"
-                    name="phone"
-                    type="tel"
-                    inputMode="tel"
-                    autoComplete="tel"
-                    value={form.phone}
-                    onChange={handleChange}
-                    placeholder="09XX XXX XXXX"
-                    className={inputClass(false)}
-                  />
-                </Field>
+                    label="Mobile number"
+                    error={errors.phone}
+                  >
+                    <input
+                      id="contact-phone"
+                      name="phone"
+                      type="tel"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      value={form.phone}
+                      onChange={handleChange}
+                      placeholder="0917 123 4567"
+                      aria-invalid={Boolean(errors.phone || errors.contact)}
+                      aria-describedby={
+                        errors.phone
+                          ? "contact-phone-error"
+                          : errors.contact
+                            ? "contact-error"
+                            : undefined
+                      }
+                      className={inputClass(
+                        Boolean(errors.phone || errors.contact)
+                      )}
+                    />
+                  </Field>
+
+                  {errors.contact && (
+                    <p
+                      id="contact-error"
+                      role="alert"
+                      className="text-sm text-rose-600"
+                    >
+                      {errors.contact}
+                    </p>
+                  )}
+                </div>
 
                 <Field
                   id="contact-message"
@@ -583,7 +639,7 @@ export default function Page() {
                 <button
                   type="submit"
                   disabled={status === "sending"}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/30 transition hover:bg-indigo-700 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {status === "sending" && (
                     <svg
